@@ -1,9 +1,26 @@
 from pypdf import PdfReader
+import psycopg2
+
+def connect_database():
+    try:
+        conn = psycopg2.connect(
+            host="localhost",
+            database="paoecirco.org",
+            user="postgres",
+            password="postgres",
+            port="5432" # Default is 5432
+        )
+        print("Conexão com o PostgreSQL bem-sucedida.")
+
+    except psycopg2.Error as e:
+        print(f"Erro ao se conectar ao PostgreSQL: {e}")
 
 # TODO connect into the database and see if the current month is already scrapped.
-print('iniciando a raspagem do relatório de presenças do mês atual.')
+print('Iniciando a raspagem do relatório de presenças do mês atual.')
 
 path = "t.pdf" ## TODO get from environment variable
+
+connect_database()
 
 reader = PdfReader(path)
 page = reader.pages[0]
