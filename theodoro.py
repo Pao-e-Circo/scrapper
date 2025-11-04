@@ -6,6 +6,8 @@ import sqlalchemy
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import difflib
+import os
+from pathlib import Path
 
 class Base(DeclarativeBase):
     pass
@@ -89,7 +91,18 @@ def get_councilour_by_name(client: sqlalchemy.Engine, name: str):
             stmt = sqlalchemy.select(Councilour).where(Councilour.name == name)
             return session.scalars(stmt).first()
 
-## algorithm start
+def get_last_attendence_pdf_full_path():
+    path = os.getenv("paoecirco.org_attendences_folder")
+
+    attendences_files = [f for f in Path(path).glob("*.pdf") if f.stem.isdigit()]
+
+    if attendences_files:
+        latest_attendence_pdf = max(attendences_files, key=lambda f: int(f.stem))
+        return latest_attendence_pdf
+    else:
+        print(f"Nenhum arquivo PDF encontrado em {path}. Os arquivos de presença precisam ser inseridos nessa pasta.")
+        raise Exception()
+
 
 client = sqlalchemy.create_engine(
     "postgresql+psycopg2://postgres:postgres@localhost:5432/paoecirco.org",
@@ -98,16 +111,16 @@ client = sqlalchemy.create_engine(
 
 Base.metadata.create_all(client)
 
-## TODO os vereadores devem ser adicionados manualmente por script
-## TODO create requirements.txt
-
-##throw_exception_if_current_month_already_executed(client)
+##TODO throw_exception_if_current_month_already_executed(client)
 
 today = date.today()
 last_month = f"{today.year}/{today.month - 1}/{today.day}" 
-print(f"\nIniciando a raspagem do relatório de presenças em {last_month}.\n")
+print(f"\nIniciando a raspagem do relatório de presenças em {last_month}.")
 
-path = "t.pdf" ## TODO get from environment variable
+path = get_last_attendence_pdf_full_path()
+
+print(f"O arquivo {path} será processado. Pressione qualquer tecla para continuar.")
+input()
 
 reader = PdfReader(path)
 page = reader.pages[0]
