@@ -5,6 +5,7 @@ import uuid
 import sqlalchemy
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, relationship
 from sqlalchemy.dialects.postgresql import UUID
+import difflib
 
 class Base(DeclarativeBase):
     pass
@@ -32,6 +33,14 @@ class Attendence(Base):
     councilour: Mapped["Councilour"] = relationship(back_populates="attendances")
 
 
+def get_councilour_name(name: str, councilours: list):
+    names = [c.name for c in councilours]
+    match = difflib.get_close_matches(name, names, n=1, cutoff=0.7)
+    if match:
+        return next(c for c in councilours if c.name == match[0])
+    return None
+
+
 def get_attendence_status_from_scrapped_str(text: str):
     return re.search(r"\b(PRESENTE|Ausente|Justificado)\b", text, re.IGNORECASE).group()
 
@@ -49,7 +58,7 @@ def add_attendence(client: sqlalchemy.Engine, attendences: list[Attendence], tex
             session_date = i
             continue
         if any(x in i for x in ['PRESENTE', 'Ausente', 'Justificado']):
-            councilour = next((c for c in councilours if c.name == get_name_from_scrapped_str(i)), None)
+            councilour = get_councilour_name(get_name_from_scrapped_str(i), councilours)
 
             if (councilour is None):
                 print(f'O vereador {get_name_from_scrapped_str(i)} participou da reunião de {session_date}, mas ele não foi encontrado '
@@ -90,6 +99,7 @@ client = sqlalchemy.create_engine(
 Base.metadata.create_all(client)
 
 ## TODO os vereadores devem ser adicionados manualmente por script
+## TODO create requirements.txt
 
 ##throw_exception_if_current_month_already_executed(client)
 
@@ -110,8 +120,19 @@ for i in range(len(reader.pages)):
     text = page.extract_text().splitlines()
     add_attendence(client, attendences, text)
 
-with Session(client) as session:
-    print('Iniciando inserção das presenças/ausências das reuniões.')
-    session.add_all(attendences)
-    session.commit()
-    print('Inserção das presenças/ausências das reuniões concluída.')
+try:
+    with Session(client) as session:
+        print('Iniciando inserção das presenças/ausências das reuniões.')
+        session.add_all(attendences)
+        session.commit()
+        print('Inserção das presenças/ausências das reuniões concluída.')
+
+except SQLAlchemyError as e:
+    # Erros específicos do SQLAlchemy (como falha no commit, violação de chave etc.)
+    print('❌ Ocorreu um erro no banco de dados:')
+    print(e)
+
+except Exception as e:
+    # Captura qualquer outro tipo de erro (como problema de conexão, variável indefinida, etc.)
+    print('⚠️ Erro inesperado:')
+    print(e)
