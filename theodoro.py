@@ -1,13 +1,16 @@
 from pypdf import PdfReader
 from datetime import date
+import locale
 import re
 import uuid
 import sqlalchemy
+from sqlalchemy import select, exists
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import difflib
 import os
 from pathlib import Path
+import sys
 
 class Base(DeclarativeBase):
     pass
@@ -34,14 +37,12 @@ class Attendence(Base):
 
     councilour: Mapped["Councilour"] = relationship(back_populates="attendances")
 
-
 def get_councilour_name(name: str, councilours: list):
     names = [c.name for c in councilours]
     match = difflib.get_close_matches(name, names, n=1, cutoff=0.7)
     if match:
         return next(c for c in councilours if c.name == match[0])
     return None
-
 
 def get_attendence_status_from_scrapped_str(text: str):
     return re.search(r"\b(PRESENTE|Ausente|Justificado)\b", text, re.IGNORECASE).group()
@@ -78,13 +79,21 @@ def get_all_councilours(client: sqlalchemy.Engine):
         stmt = sqlalchemy.select(Councilour)
         return session.scalars(stmt).all()
 
-def throw_exception_if_current_month_already_executed(client: sqlalchemy.Engine):
+def throw_exception_if_current_month_already_executed(client: sqlalchemy.Engine, month_name, year):
     with Session(client) as session:
-        stmt = sqlalchemy.select(Attendence)
-        results = session.scalars(stmt).all()
+        stmt = (
+            select(Attendence)
+            .where(
+                (Attendence.month.ilike(f"%{month_name}%")) &
+                (Attendence.month.ilike(f"%{year}%"))
+            )
+        )
 
-        for a in results:
-            print(f"ID: {a.id}, Councilor ID: {a.councilor_id}, Month: {a.month}, Status: {a.status}")
+        has_any = session.scalars(stmt).all()
+
+        if has_any:
+            print('Parece que o mês atual já foi executado na base. Programa encerrado.')
+            sys.exit(0)
 
 def get_councilour_by_name(client: sqlalchemy.Engine, name: str):
     with Session(client) as session:
@@ -103,6 +112,7 @@ def get_last_attendence_pdf_full_path():
         print(f"Nenhum arquivo PDF encontrado em {path}. Os arquivos de presença precisam ser inseridos nessa pasta.")
         raise Exception()
 
+locale.setlocale(locale.LC_TIME, 'pt_BR.utf8')
 
 client = sqlalchemy.create_engine(
     "postgresql+psycopg2://postgres:postgres@localhost:5432/paoecirco.org",
@@ -111,16 +121,20 @@ client = sqlalchemy.create_engine(
 
 Base.metadata.create_all(client)
 
-##TODO throw_exception_if_current_month_already_executed(client)
+##TODO create docker file with environment variables
 
 today = date.today()
-last_month = f"{today.year}/{today.month - 1}/{today.day}" 
-print(f"\nIniciando a raspagem do relatório de presenças em {last_month}.")
+month_name = f"{today.strftime("%B")}"
+
+throw_exception_if_current_month_already_executed(client, month_name, today.year)
 
 path = get_last_attendence_pdf_full_path()
+last_month = f"{today.year}/{today.month - 1}/{today.day}" 
 
-print(f"O arquivo {path} será processado. Pressione qualquer tecla para continuar.")
+print(f"O arquivo {path} será processado, ele deve representar o mês {last_month}. Se isso estiver correto, clique qualquer tecla para continuar.")
 input()
+
+print(f"\nIniciando a raspagem do relatório de presenças em {last_month}.")
 
 reader = PdfReader(path)
 page = reader.pages[0]
@@ -139,13 +153,3 @@ try:
         session.add_all(attendences)
         session.commit()
         print('Inserção das presenças/ausências das reuniões concluída.')
-
-except SQLAlchemyError as e:
-    # Erros específicos do SQLAlchemy (como falha no commit, violação de chave etc.)
-    print('❌ Ocorreu um erro no banco de dados:')
-    print(e)
-
-except Exception as e:
-    # Captura qualquer outro tipo de erro (como problema de conexão, variável indefinida, etc.)
-    print('⚠️ Erro inesperado:')
-    print(e)
